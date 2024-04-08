@@ -1,0 +1,118 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "HX711.h" 
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+#define BUTTON_PIN 5
+#define LOADCELL_DOUT_PIN  16
+#define LOADCELL_SCK_PIN  4
+#define vcc 2
+
+HX711 scale;
+
+volatile bool buttonPressed = false;
+volatile unsigned long lastDebounceTime = 0;
+volatile unsigned long debounceDelay = 50;
+float calibration_factor =  1700; // Calibration factor for your specific load cell
+
+// Function declarations
+void buttonInterrupt();
+int weight();
+
+void setup() {
+  Serial.begin(57600);
+  
+  pinMode(BUTTON_PIN, INPUT_PULLUP); // Set button pin as input with internal pull-up resistor
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonInterrupt, FALLING); // Attach interrupt to the button pin
+  
+  // Initialize OLED display
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;);
+  }
+  delay(2000);
+  display.clearDisplay();
+
+  // Display static text
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("Antz!");
+  display.display();
+
+  // Set up the HX711 scale
+  digitalWrite(vcc, HIGH); // Turn on the HX711 module
+  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+  scale.set_scale();
+  scale.tare();  // Reset the scale to 0
+
+  long zero_factor = scale.read_average(); // Get a baseline reading
+  Serial.print("Zero factor: ");
+  Serial.println(zero_factor);
+}
+
+void loop() {
+  // Read weight and display it
+  weight();
+
+  // Check if the button is pressed
+  if (buttonPressed) {
+    // Reset scale calibration and tare the scale
+    scale.set_scale();
+    scale.tare();
+    buttonPressed = false;
+    Serial.println("Tare Done");
+    
+    // Display "Tare Done" message
+    display.clearDisplay();
+    display.setTextSize(3);
+    display.setTextColor(WHITE);
+    display.setCursor(0,0);
+    display.println("Tare");
+    display.setCursor(0,40);
+    display.println("Done");
+    display.display();
+    delay(1000);
+  }
+
+  // If weight is less than 10, perform tare operation
+  if (weight() < 10) {
+    scale.set_scale();
+    scale.tare();
+  }
+}
+
+// Interrupt service routine for the button
+void buttonInterrupt() {
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    buttonPressed = true;
+  }
+  lastDebounceTime = millis();
+}
+
+// Function to read weight and display it on the OLED
+int weight() {
+  scale.set_scale(calibration_factor); // Adjust to this calibration factor
+  volatile int weight = (scale.get_units(10)); // Get the weight reading
+  delay(10);
+  
+  // Display weight on OLED
+  display.clearDisplay();
+  display.setTextSize(3);
+  display.setTextColor(WHITE);
+  display.setCursor(0,0);
+  display.println("Weight");
+  display.setCursor(0,40);
+  display.println(weight);
+  display.setCursor(60,40);
+  display.println("G");
+  display.display();
+
+  return weight; // Return the weight reading
+}
